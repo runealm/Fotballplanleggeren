@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fotballplanleggeren</title>
+  <style>
+    :root{--brand:#2d89ef;--bg:#f7f9fc;--card:#fff;--line:#e6eefc}
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial;background:var(--bg);margin:0;padding:18px;color:#0f172a}
+    .wrap{max-width:1000px;margin:0 auto}
+    header{display:flex;gap:12px;align-items:center;margin-bottom:14px}
+    header img{height:44px;width:44px;object-fit:contain;border-radius:6px;background:#fff}
+    h1{margin:0;font-size:1.25rem}
+    .card{background:var(--card);padding:16px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.06)}
+    .grid{display:grid;gap:10px}
+    .grid.cols-2{grid-template-columns:1fr 1fr}
+    .grid.cols-3{grid-template-columns:repeat(3,1fr)}
+    label{font-weight:600;font-size:.95rem}
+    textarea,input,select,button{width:100%;padding:8px;border-radius:8px;border:1px solid #d1d5db;font-size:0.95rem}
+    textarea{min-height:64px}
+    .actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+    button.primary{background:var(--brand);color:#fff;border:none;padding:10px 14px;border-radius:10px;cursor:pointer}
+    button.ghost{background:#f8fafc;border:1px solid #e6eefc}
+    .table-wrap{overflow-x:auto;margin-top:12px}
+    table{width:100%;border-collapse:collapse;background:#fff}
+    th,td{padding:8px;border:1px solid #eef2ff;text-align:center;font-size:0.92rem}
+    th{background:#f8fafc}
+    .round-header td{background:#eef6ff;text-align:left;font-weight:700}
+    .note{font-size:0.9rem;color:#475569;margin-top:10px}
+    @media (max-width:640px){
+      .grid.cols-3{grid-template-columns:1fr}
+      .grid.cols-2{grid-template-columns:1fr}
+      header{gap:8px}
+      h1{font-size:1.05rem}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="logo.png" alt="Logo (bytt ut ved behov)">
+      <div>
+        <h1>Fotballplanleggeren ⚽</h1>
+        <div style="font-size:0.9rem;color:#475569">Generer kampoppsett og eksporter til Spond</div>
+      </div>
+    </header>
+
+    <div class="card">
+      <div class="grid">
+        <div>
+          <label for="teams">Lagnavn (ett per linje eller kommaseparert)</label>
+          <textarea id="teams" placeholder="Åfoss G6&#10;Skotfoss G6&#10;Gulset G6"></textarea>
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:10px">
+        <div>
+          <label for="fields">Antall baner</label>
+          <input id="fields" type="number" min="1" value="2">
+        </div>
+        <div>
+          <label for="matchTime">Spilletid (min)</label>
+          <input id="matchTime" type="number" min="1" value="20">
+        </div>
+        <div>
+          <label for="pauseTime">Pause mellom kamper (min)</label>
+          <input id="pauseTime" type="number" min="0" value="10">
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:10px">
+        <div>
+          <label for="dayType">Kampdager</label>
+          <select id="dayType"><option value="weekday">Ukedager</option><option value="weekend">Helger</option></select>
+        </div>
+        <div>
+          <label for="startDate">Ønsket startdato (valgfritt)</label>
+          <input id="startDate" type="date">
+        </div>
+        <div>
+          <label for="startTime">Starttid</label>
+          <input id="startTime" type="time" value="17:00">
+        </div>
+      </div>
+
+      <div style="margin-top:10px">
+        <label for="excludedDates">Datoer som ikke passer (YYYY-MM-DD, kommaseparert)</label>
+        <textarea id="excludedDates" placeholder="2025-09-14,2025-09-21"></textarea>
+      </div>
+
+      <div style="margin-top:10px">
+        <label for="host">Kampvert / arrangør (for hele dagen)</label>
+        <input id="host" type="text" placeholder="Navn på arrangør">
+      </div>
+
+      <div class="actions">
+        <button class="primary" onclick="generateSchedule()">Generer kampoppsett</button>
+        <button class="ghost" onclick="exportCSV()">Eksporter til Spond (CSV)</button>
+        <button class="ghost" onclick="copyToSpond()">Kopier til Spond</button>
+      </div>
+
+      <div class="note" id="note">Merk: med oddetall lag vil ett lag ha pause hver runde.</div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="table-wrap">
+        <table id="scheduleTable" aria-live="polite">
+          <thead>
+            <tr><th>Dato</th><th>Tid</th><th>Bane</th><th>Lag A</th><th>Lag B</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const pad = n => (n < 10 ? '0' + n : '' + n);
+    const isoDate = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const isWeekend = d => d.getDay() === 0 || d.getDay() === 6;
+
+    function parseExcluded(raw) {
+      if (!raw) return [];
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    function getNextValidDate(fromDate, dayType, excluded) {
+      let d = new Date(fromDate);
+      while (true) {
+        const iso = isoDate(d);
+        const day = d.getDay();
+        const blocked = excluded.includes(iso);
+        const okDay = (dayType === 'weekday' && day >=1 && day <=5) || (dayType === 'weekend' && (day === 0 || day === 6));
+        if (okDay && !blocked) return d;
+        d.setDate(d.getDate() + 1);
+      }
+    }
+
+    let matches = [];
+
+    function generateSchedule() {
+      try {
+        const rawTeams = (document.getElementById('teams').value || '').trim();
+        const fields = Math.max(1, parseInt(document.getElementById('fields').value || '1', 10));
+        const matchTime = Math.max(1, parseInt(document.getElementById('matchTime').value || '20', 10));
+        const pauseTime = Math.max(0, parseInt(document.getElementById('pauseTime').value || '10', 10));
+        const dayType = document.getElementById('dayType').value;
+        const startDateStr = document.getElementById('startDate').value;
+        const startTimeStr = document.getElementById('startTime').value || '10:00';
+        const excluded = parseExcluded(document.getElementById('excludedDates').value);
+        const [startHour, startMinute] = startTimeStr.split(':').map(n => parseInt(n,10));
+
+        if (!rawTeams) { alert('Skriv inn lag (minst 2).'); return; }
+        const teamListInput = rawTeams.split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
+        const teams = [...teamListInput];
+        if (teams.length < 2) { alert('Skriv inn minst 2 lag.'); return; }
+
+        let start = startDateStr ? new Date(startDateStr) : new Date();
+        start.setHours(startHour, startMinute, 0, 0);
+        start = getNextValidDate(start, dayType, excluded);
+        start.setHours(startHour, startMinute, 0, 0);
+
+        const workTeams = [...teams];
+        if (workTeams.length % 2 !== 0) workTeams.push('PAUSE');
+        const n = workTeams.length;
+        const rounds = n - 1;
+        const half = n / 2;
+
+        matches = [];
+        const tbody = document.querySelector('#scheduleTable tbody');
+        tbody.innerHTML = '';
+
+        const maxParallel = Math.min(fields, Math.floor(teams.length / 2));
+        document.getElementById('note').textContent = `Maks samtidige kamper = ${maxParallel}. ` +
+          (teams.length % 2 === 1 ? 'Étt lag vil ha pause hver runde.' : '');
+
+        let arr = [...workTeams];
+        let roundStart = new Date(start);
+        const blockLenMs = (matchTime + pauseTime) * 60000;
+
+        // Teller antall kamper per lag
+        let playCount = {};
+        teams.forEach(t => playCount[t] = 0);
+
+        for (let r = 0; r < rounds; r++) {
+          const pairs = [];
+          let pauseTeam = null;
+          for (let i = 0; i < half; i++) {
+            const A = arr[i], B = arr[n - 1 - i];
+            if (A === 'PAUSE' && B !== 'PAUSE') pauseTeam = B;
+            else if (B === 'PAUSE' && A !== 'PAUSE') pauseTeam = A;
+            else if (A !== 'PAUSE' && B !== 'PAUSE') {
+              if (playCount[A] < 3 && playCount[B] < 3) {
+                pairs.push([A, B]);
+                playCount[A]++;
+                playCount[B]++;
+              }
+            }
+          }
+
+          const headerRow = document.createElement('tr');
+          headerRow.className = 'round-header';
+          const headerCell = document.createElement('td');
+          headerCell.colSpan = 5;
+          headerCell.textContent = `Runde ${r + 1}${pauseTeam ? ' (Pause: ' + pauseTeam + ')' : ''}`;
+          headerRow.appendChild(headerCell);
+          tbody.appendChild(headerRow);
+
+          let blockStart = new Date(roundStart);
+          for (let m = 0; m < pairs.length; m++) {
+            if (m > 0 && m % fields === 0) {
+              blockStart = new Date(blockStart.getTime() + blockLenMs);
+            }
+
+            const field = (m % fields) + 1;
+            const sdt = new Date(blockStart);
+            const match = {
+              date: isoDate(sdt),
+              time: sdt.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
+              field,
+              teamA: pairs[m][0],
+              teamB: pairs[m][1],
+              round: r+1
+            };
+            matches.push(match);
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${match.date}</td><td>${match.time}</td><td>Bane ${match.field}</td><td>${match.teamA}</td><td>${match.teamB}</td>`;
+            tbody.appendChild(tr);
+          }
+
+          const blocksUsed = Math.max(1, Math.ceil(pairs.length / fields));
+          roundStart = new Date(roundStart.getTime() + blocksUsed * blockLenMs);
+
+          const fixed = arr[0];
+          const rest = arr.slice(1);
+          rest.unshift(rest.pop());
+          arr = [fixed, ...rest];
+        }
+        document.querySelector('.table-wrap').scrollIntoView({behavior:'smooth'});
+      } catch (err) {
+        console.error(err);
+        alert('Noe gikk galt ved generering.');
+      }
+    }
+
+    function exportCSV() {
+      try {
+        if (!matches || matches.length === 0) { alert('Generer først kampoppsettet.'); return; }
+        const host = (document.getElementById('host').value || '').trim();
+        const location = 'Fotballbanen';
+        let desc = '';
+        if (host) desc += `Kampvert: ${host}\n\n`;
+        let currentRound = 0;
+        matches.forEach(m => {
+          if (m.round !== currentRound) {
+            currentRound = m.round;
+            desc += `Runde ${currentRound}:\n`;
+          }
+          desc += `${m.date} ${m.time} - Bane ${m.field}: ${m.teamA} vs ${m.teamB}\n`;
+        });
+
+        const title = 'Turneringsdag';
+        const csvHeader = 'Tittel,Beskrivelse,Dato,Tid,Sted\n';
+        const first = matches[0];
+        const safe = s => s.replace(/"/g,'""');
+        const csvRow = `"${safe(title)}","${safe(desc)}",${first.date},${first.time},"${safe(location)}"\n`;
+        const blob = new Blob([csvHeader + csvRow], {type:'text/csv;charset=utf-8;'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'kampoppsett_spond.csv';
+        a.click();
+      } catch (err) {
+        console.error(err);
+        alert('Noe gikk galt ved eksport.');
+      }
+    }
+
+    function copyToSpond() {
+      try {
+        if (!matches || matches.length === 0) { alert('Generer først kampoppsettet.'); return; }
+        const host = (document.getElementById('host').value || '').trim();
+        let text = '';
+        if (host) text += `Kampvert: ${host}\n\n`;
+        let currentRound = 0;
+        matches.forEach(m => {
+          if (m.round !== currentRound) {
+            currentRound = m.round;
+            text += `Runde ${currentRound}:\n`;
+          }
+          // Dato uten år (DD-MM)
+          const [yyyy, mm, dd] = m.date.split("-");
+          const formattedDate = `${dd}-${mm}`;
+          text += `${formattedDate} ${m.time} - Bane ${m.field}: ${m.teamA} vs ${m.teamB}\n`;
+        });
+        navigator.clipboard.writeText(text).then(() => {
+          alert('Kampoppsett kopiert til utklippstavlen! Lim det inn i Spond.');
+        });
+      } catch (err) {
+        console.error(err);
+        alert('Klarte ikke å kopiere til utklippstavlen.');
+      }
+    }
+  </script>
+  <footer style="text-align:center; margin-top:40px; font-size:13px; color:#666;">
+    Almenning Data - 2025
+  </footer>
+</body>
+</html>
