@@ -37,8 +37,11 @@ Eksporter til Spond via:
 📂 Struktur
 
 fotballplanleggeren/
+
 ├── index.html        # Hele applikasjonen (HTML, CSS, JS)
+
 ├── logo.png          # Logo som vises i headeren
+
 └── README.md         # Denne filen
 
 🧠 Logikk for kampoppsett
