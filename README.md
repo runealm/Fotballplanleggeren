@@ -1,6 +1,4 @@
-# Fotballplanleggeren
-⚽ Fotballplanleggeren
-
+# Fotballplanleggeren ⚽
 Fotballplanleggeren er et enkelt verktøy for å generere kampoppsett for barne- og ungdomsturneringer.
 Du kan angi lag, baner, spilletid, pauser, kampdager og ekskluderte datoer — og deretter eksportere alt direkte til Spond (CSV eller tekst).
 
